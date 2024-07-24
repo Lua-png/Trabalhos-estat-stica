@@ -1,0 +1,344 @@
+---
+title: "Trabalho final Análise de Sobrevivência"
+author: "Lua Nardi Quito - 11371270"
+date: '2022-07-20'
+output:
+  pdf_document:
+    latex_engine: xelatex
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Introdução
+```{r}
+#importando o conjunto de dados e carregando as bibliotecas necessarias
+library(readxl)
+library(survival)
+library(pander)
+library(tidyverse)
+library(KMsurv)
+library(survminer)
+library(dplyr)
+df <- read_excel("InsufCardiaca+_1_ (1).xls")
+head(df)
+```
+Informações sobre o conjunto de dados:
+
+-O arquivo InsufCardiaca.csv contém dados de 947 pacientes com insuficiência cardiaca. Estes pacientes foram encaminhados para um tratamento no período de 2 de julho de 2003 a 2 de julho de 2006 no Instituto do Coraçao (INCOR). O objetivo do estudo é identificar o fatores prognósticos importantes para a sobrevida dos pacientes.
+
+-Descrição das variáveis:
+
+• Tempo, em meses, até a ocorrência de um dos eventos (óbito ou censura).
+
+• Censura: categorizada como censura (0) e óbito (1).
+
+• Idade do paciente na data do diagnóstico, nas categorias: de 18 (inclusive) a 35 (0); de 35 (inclusive) a 45 (1); de 45 (inclusive) a 55 (2); de 55 (inclusive) a 65 (3); 65 anos ou mais (4).
+
+• Sexo dos pacientes: masculino (1) ou feminino (2).
+
+• Índice de massa corpórea do paciente na data da consulta do paciente (imc), em kg/m2.
+
+• Pressão arterial sistólica do paciente avaliada no início do tratamento (pas), em mmHg.
+
+• Diagnóstico da etiologia (diag), que é o motivo pelo qual o paciente desenvolveu a insuficiência cardíaca. Esta variável foi agrupada da seguinte maneira: doença de Chagas (1); doença cardiaca hipertensiva (2); miocardiopatia isquêmica (3); insuficiência cardíaca não especificada (4) e outras (5).
+
+• Classe funcional (class), que é avaliado da capacidade que um indivıduo obtem em um determinado exercício, com as seguintes categorias: sem sintomas (1); limitado a grandes esforcos (2); limitado para esforços moderados(3); limitado mesmo em repouso (4); não referido (9).
+
+• Concentraçâo de hemoglobina no sangue (hb), em mg/dL.
+
+• Taxa de triglicerides no sangue (trigli), em mg/dl.
+
+• Fração de ejeção (frac), classificada em: preservada (≥ 55%) (1); diminuıda (< 55%) (2); dados faltantes (3).
+
+• Rítmo cardíaco (ritmo), classificado em: sinusal(1); fluter ou fibrilação atrial(2); outros(3); dados faltantes(4).
+
+• Uso de Carvediol (droga1): tomou(1) ou não tomou (0).
+
+• Uso de Digoxina (droga2): tomou(1) ou não tomou (0).
+
+• Uso de Aspirina (droga3): tomou(1) ou não tomou (0).
+
+
+Covariáveis numéricas: imc, pas, hb, trigli.
+
+Covariáveis categóricas: idade, sexo, diag, class, frac, ritmo, droga1, droga2, droga3.
+
+O conjunto de dados apresenta 13 covariáveis no total, e a variável de interesse (tempo) seguida da indicação de censura.
+
+### Análise Exploratória dos dados
+
+```{r}
+#breve análise exploratória de variáveis importantes para a análise
+pander(summary(df$tempo))
+```
+
+```{r}
+#grafico de densidade da variável tempo
+library(ggplot2)
+library(ggpubr)
+p <- ggplot(df, aes(x=tempo)) + 
+  geom_density(color="darkblue", fill="lightblue")
+p+ geom_vline(aes(xintercept=mean(tempo)),
+            color="black", linetype="dashed", size=1)
+```
+```{r}
+barplot(table(df$censura),
+main="Distribuição Censura",
+border="red",
+col="red",
+density=10
+)
+```
+obs: temos muitas censuras e poucos óbitos de fato.
+
+```{r}
+barplot(table(df$diag),
+main="Distribuição Diagnóstico",
+border="purple",
+col="purple",
+density=10
+)
+```
+Obs: estranhamente existe um tipo de diagnóstico 6 que aparece apenas 2 vezes no conjunto de dados. Ele não consta descrição que nos foi dada dos dados. Portanto, iremos considerá-los outliers e remove-los do conjunto de dados.
+
+```{r}
+df2<-subset(df, diag!="6") #df2 nao possui as observacoes com diag 6
+```
+
+```{r}
+barplot(table(df2$class),
+main="Distribuição Classes",
+border="orange",
+col="orange",
+density=10
+)
+```
+Obs: a classe 9 não é informativa pois nela constam os dados cuja informacao da classe funcional estava faltando (não especificada). Portando, poderia ser interessante remove-la do dataset também. Porém decidi por não fazer isso nessa análise.
+
+## Curvas de sobrevivência
+
+Para analisar a significancia de cada covariavel, iremos considerar suas curvas de sobrevivencia e aplicar os testes log-rank e wilcoxon. A aplicação desses testes só é possível com variáveis categóricas, de preferencia dicotômicas, portanto iremos desconsiderar as covariaveis numéricas. Seria possível dicotomizar essas variaveis numéricas em uma futura análise mais completa.
+
+```{r}
+newdf <- subset(df, select=c("tempo", "censura", "Idade", "sexo", "diag", "class", "frac", "ritmo", "droga1", "droga2", "droga3" )) #novo dataframe apenas com as variáveis categóricas
+
+#Curva de sobrevivencia
+km_fit <- survfit(Surv(tempo, censura) ~ 1, data = df2)
+ggsurvplot(km_fit, data = newdf)
+```
+observamos que a taxa de sobrevivencia dos pacientes é alta, ja que a curva de sobrevivencia não possui mediana.
+
+```{r}
+#Testes logrank e de Wilcoxon utilizados para testar a igualdade 
+#das curvas de sobrevivencia obtidas para as covariáveis.
+
+lr_sexo = survdiff(Surv(tempo,censura)~sexo,rho=0, data = df2) #logrank
+wk_sexo = survdiff(Surv(tempo,censura)~sexo,rho=1,data = df2) #wilcox
+
+lr_diag = survdiff(Surv(tempo,censura)~diag,rho=0,data = df2) #logrank
+wk_diag = survdiff(Surv(tempo,censura)~diag,rho=1, data = df2) #wilcox
+
+lr_class = survdiff(Surv(tempo,censura)~class,rho=0,data = df2) #logrank
+wk_class = survdiff(Surv(tempo,censura)~class,rho=1,data = df2) #wilcox
+
+lr_frac = survdiff(Surv(tempo,censura)~frac,rho=0,data = df2) #logrank
+wk_frac = survdiff(Surv(tempo,censura)~frac,rho=1,data = df2) #wilcox
+
+lr_ritmo = survdiff(Surv(tempo,censura)~ritmo,rho=0,data = df2) #logrank
+wk_ritmo = survdiff(Surv(tempo,censura)~ritmo,rho=1,data = df2) #wilcox
+
+lr_droga1 = survdiff(Surv(tempo,censura)~droga1,rho=0,data = df2) #logrank
+wk_droga1 = survdiff(Surv(tempo,censura)~droga1,rho=1,data = df2) #wilcox
+
+lr_droga2 = survdiff(Surv(tempo,censura)~droga2,rho=0,data = df2) #logrank
+wk_droga2 = survdiff(Surv(tempo,censura)~droga2,rho=1,data = df2) #wilcox
+
+lr_droga3 = survdiff(Surv(tempo,censura)~droga3,rho=0,data = df2) #logrank
+wk_droga3 = survdiff(Surv(tempo,censura)~droga3,rho=1,data = df2) #wilcox
+
+
+pvalor_logrank = c(1 - pchisq(lr_sexo$chisq, length(lr_sexo$n) - 1),
+                  1 - pchisq(lr_diag$chisq, length(lr_diag$n) - 1),
+                  1 - pchisq(lr_class$chisq, length(lr_class$n) - 1),
+                  1 - pchisq(lr_frac$chisq, length(lr_frac$n) - 1),
+                  1 - pchisq(lr_ritmo$chisq, length(lr_ritmo$n) - 1),
+                  1 - pchisq(lr_droga1$chisq, length(lr_droga1$n) - 1),
+                  1 - pchisq(lr_droga2$chisq, length(lr_droga2$n) - 1),
+                  1 - pchisq(lr_droga3$chisq, length(lr_droga3$n) - 1))
+
+pvalor_wilcoxon = c(1 - pchisq(wk_sexo$chisq, length(wk_sexo$n) - 1),
+                   1 - pchisq(wk_diag$chisq, length(wk_diag$n) - 1),
+                   1 - pchisq(wk_class$chisq, length(wk_class$n) - 1),
+                   1 - pchisq(wk_frac$chisq, length(wk_frac$n) - 1),
+                   1 - pchisq(wk_ritmo$chisq, length(wk_ritmo$n) - 1),
+                   1 - pchisq(wk_droga1$chisq, length(wk_droga1$n) - 1),
+                   1 - pchisq(wk_droga2$chisq, length(wk_droga2$n) - 1),
+                   1 - pchisq(wk_droga3$chisq, length(wk_droga3$n) - 1))
+variaveis = c('sexo','diag','class','frac','ritmo','droga1','droga2','droga3')
+
+tabela <- data.frame(variaveis,pvalor_logrank,pvalor_wilcoxon)
+tabela
+```
+
+Os p-valores da tabela indicam se as curvas de sobrevivencia geradas por cada classe são significativamente diferentes uma da outra. Vamos considerar significantes as variáveis cujo p-valor foi menor que 0.05
+
+Por exemplo: o p-valor para a variável "droga1" foi extremamente alto, próximo de 1. Ou seja, as curvas de sobrevivencia para os pacientes que tomaram e não tomaram a droga1 não são estatísticamente diferentes. Portanto essa covariável não é considerada importante para nossa modelagem.
+
+Portanto, as covariáveis que iremos considerar significativas e utilizaremos na modelagem serão: diag, class e droga2.
+
+Gráfico das covariáveis que apresentaram curvas de sobrevivencia significantemente diferentes para melhor interpretabilidade. 
+
+```{r}
+#curvas de sobrevivencia da covariavel droga2
+km_droga2 <- survfit(Surv(tempo,censura) ~ droga2, data = df)
+ggsurvplot(km_droga2)
+```
+Podemos observar que pacientes que não tomaram a droga 2 tiveram uma media do tempo de sobrevivencia maior.
+
+```{r}
+#curvas de sobrevivencia da covariavel class
+km_class <- survfit(Surv(tempo,censura) ~ class, data = df)
+ggsurvplot(km_class)
+```
+
+```{r}
+#curvas de sobrevivencia da covariavel diag
+km_diag <- survfit(Surv(tempo,censura) ~ diag, data = df2)
+ggsurvplot(km_diag)
+```
+obs: não sabemos o que é o diagnóstico do tipo 6. Ele nem consta na descrição do dataset
+
+obs: vale lembrar que o teste log-rank não é tão confiável quando as curvas de sobrevivência se cruzam. Além disso, a classe 9 ("não referido") não é muito informativa.
+
+### Modelo Paramétrico
+
+Para decidir qual distribuição utilizar no modelo, vamos utilizar O teste da razao de verossimilhancas e escolher a distribuicao que tem o maior p-valor, ou seja, se encaixa melhor aos dados.
+
+```{r}
+library(flexsurv)
+#ajuste do modelo parametrico usando varias distribuicoes
+
+fit_exp <- flexsurvreg(Surv(tempo,censura)~1, dist='exponential', data = df)
+
+lambda = 1/fit_exp$res[1]
+
+fit_log <- flexsurvreg(Surv(tempo,censura)~1, dist='lognorm', data = df)
+
+fit_wei <- flexsurvreg(Surv(tempo,censura)~1, dist='weibull', data = df)
+
+lambda = fit_wei$res[1]
+alpha = fit_wei$res[2]
+
+fit_gamma <- flexsurvreg(Surv(tempo, censura)~1, dist = 'gamma', data = df)
+
+fit_gammagen <- flexsurvreg(Surv(tempo, censura)~1, dist = 'gengamma', data = df)
+
+Modelo = c("Gama Generalizado", "Exponencial", "Log-Normal", "Weibull", "gamma")
+Verossimilhanca = c(fit_gammagen$loglik, fit_exp$loglik, fit_log$loglik, fit_wei$loglik, fit_gamma$loglik)
+TRV = 2*(fit_gammagen$loglik-Verossimilhanca)
+valor_p = pchisq(TRV,df=2,lower.tail=FALSE) %>% round(2)
+
+resultado = data.frame(Modelo=Modelo, 
+                       Verossimilhanca = Verossimilhanca, 
+                       TRV=TRV, 
+                       valor_p=valor_p)
+resultado
+```
+Observamos que o modelo weibull possui o maior p-valor, portando é a distribuiçao que utilizaremos.
+
+
+```{r}
+#utilizando a distribuicao weibull, agora apenas com as covariaveis selecionadas
+ajuste3<-survreg(Surv(tempo,censura)~factor(class)+factor(diag)+factor(droga2),
+                dist="weibull", data = df2) 
+summary(ajuste3)
+```
+obs: os coeficientes nos dizem bastante sobre o peso de cada característica para a modelagem. Por exemplo, a classe 9 possúi um coeficiente negativo de valor alto, ou seja, se um paciente pertence a classe 9, o modelo vai assumir que sua chance de sobrevivencia é menor comparada as outras classes.
+
+```{r}
+ajuste3$coefficients
+```
+
+```{r}
+library(fastDummies) #criando dummies para as variáveis categóricas
+dat <- dummy_cols(df2, select_columns = 'class')
+dat <- dummy_cols(dat, select_columns = 'diag')
+```
+
+
+```{r}
+#análise dos resíduos
+attach(dat)
+xb <- ajuste3$coefficients[1]+ajuste3$coefficients[2]*class_2+ajuste3$coefficients[3]*class_3+ajuste3$coefficients[4]*class_4+ajuste3$coefficients[5]*class_9+ajuste3$coefficients[6]*diag_2+ajuste3$coefficients[7]*diag_3+ajuste3$coefficients[8]*diag_4+ajuste3$coefficients[9]*diag_5++ajuste3$coefficients[10]*droga2
+
+sigma<-ajuste3$scale
+res<-(log(tempo)-(xb))/sigma # residuos padronizados
+resid<-exp(res) # exponencial dos residuos padronizados
+ekm<- survfit(Surv(resid,censura)~1)
+resid<-ekm$time
+sln<-pnorm(-log(resid))
+par(mfrow=c(1,2))
+plot(ekm$surv,sln, xlab="S(ei*): Kaplan-Meier",ylab="S(ei*): Normal Padrao",pch=16)
+plot(ekm,conf.int=F,mark.time=F,xlab="Residuos (ei*)",ylab="Sobrevivencia estimada",pch=16)
+lines(resid,sln,lty=2)
+legend(1.3,0.8,lty=c(1,2),c("Kaplan-Meier","Weibull"),cex=0.8,bty="n")
+
+```
+
+Nas figuras acima podemos observar a adequação do modelo Weibull aos dados. 
+
+Sobrevivencias dos resíduos (ei*) estimadas pelo metodo de Kaplan-Meier e
+pelo modelo Weibull (grafico a esquerda).
+
+Respectivas curvas de sobrevivência estimadas (gráfico a direita).
+
+obs: vemos que o modelo não está tão bem ajustado. Idealmente gostaríamos que os pontos do grafico da esquerda se aproximassem de uma reta identidade. E as duas curvas do grafico da direita deveriam estar mais proximas umas da outra.
+
+```{r}
+# residuos de Cox-Snell
+ei<- -log(1-pnorm(res)) 
+ekm1<-survfit(Surv(ei,censura)~1)
+t<-ekm1$time
+st<-ekm1$surv
+sexp<-exp(-t)
+par(mfrow=c(1,2))
+plot(st,sexp,xlab="S(ei): Kaplan-Meier",ylab="S(ei): Exponencial padrao",pch=16)
+plot(ekm1,conf.int=F,mark.time=F, xlab="Residuos de Cox-Snell", ylab="Sobrevivencia estimada")
+lines(t,sexp,lty=4)
+legend(1.0,0.8,lty=c(1,4),c("Kaplan-Meier","Exponencial padrao"),cex=0.8,bty="n")
+```
+
+### Modelo de Cox
+
+```{r}
+#ajuste do modelo
+fit3<- coxph(Surv(tempo,censura)~factor(droga2) +factor(class)+ factor(diag), data=df2,
+x = T, method="breslow")
+summary(fit3)
+```
+```{r}
+fit4<-coxph(Surv(tempo,censura) ~ droga2 *class * diag,
+data=df2, x = T, method="breslow")
+summary(fit4)
+```
+```{r}
+plot(cox.zph(fit3))
+```
+As figura acima mostram os resíduos escalonados de Schoenfeld do modelo de Cox sem a interação.
+
+```{r}
+par(mfrow=c(2,4))
+plot(cox.zph(fit4))
+```
+A figura acima mostra os resíduos escalonados de Schoenfeld do modelo de Cox com a interação. O modelo de cox parece se ajustar bem aos dados.
+
+
+### Conclusão
+
+Pudemos concluir que entre as variáveis categóricas, as mais significantes para a variável de interesse são as variáveis droga2, class e diag. Pacientes que fizeram uso da droga 2 tiveram uma menor chance de sobrevivência, como pudemos observar no gráfico das curvas de sobrevivencia e também devido ao coeficiente negativo na regressão paramétrica. Em relação a classe, pacientes da classe 1 e 2 (sem sintomas ou limitado a grandes esforcos) tiveram uma sobrevivencia maior que os das classes 3, 4 e 9 (limitado para esforços moderados, limitado mesmo em repouso e não referido). Os diagnósticos do tipo 3 e 5 (miocardiopatia isquêmica e outros) foram significativamente positivos para a sobrevivência do paciente (alto coeficiente na regressão), enquanto os diagnósticos do tipo 1,2,4 (doença cardiaca hipertensiva, miocardiopatia isquêmica e insuficiência cardíaca não especificada) foram mais neutros, tendo coeficientes mais próximos de zero.
+
+Os modelos de regressão de Cox pareceram se encaixar melhor aos dados do que os paramétricos.
